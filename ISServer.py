@@ -1,95 +1,243 @@
 import hashlib
+import random
+import json
+from Crypto.Cipher import AES 
+import socket
+import time
+import sys
 
-test = True
+test = False
 
-class dataRecord():
-    def __init__(self, idx, ss):
-        self.id = idx
-        self.ss = ss
-        self.share1 = (None,None) #share of another servers share
-        self.share2 = (None,None)
+records = ["132", "56", "9", "100", "80", "32", "42", "42", "3", "10"]
+class ISS():
+    def __init__(self):
+        self.firstMessage = True
+        self.bloomFilter = {}
+        self.shares = []
 
-#Client, when sending SS'd record, also sends Bloomfilter of the record itself,
+    def dataReceived(self, data):
+        #self.transport.write("Hello from the honeypot, you said: " + data)
+        try:
+            data = json.loads(data)
+        except:
+            print("failed to parse json data")
+            #self.transport.loseConnection()
+        print('---------------------------')
+        self.transport.write("Hi")
+        if data["action"] == "query":
+            garbledCircuit = data["GC"]
+            keys = ""
+            self.transport.write("requestKeys ") 
+            #self.evalGC(garbledCircuit, self.bloomFilter["root"])
 
-#For demo purposes, I'll have the clients send the SS, and the record itself, and have each server create the original bloom filter I'd need to convert each object into
-#JSON objects, or something that is parsable
-class BloomFilter():
-    def __init__(self, size=20, hashcount=10):
-        self.size = size #size of bitarray
-        self.hashcount = hashcount # hashes
-        self.bitarray = size*[0]
+        if data["action"] == "provideKeys":
+            pass
+        
+        print("Received: ",  data, len(data))
+        return data
 
-    def create(self, record): #bloomfilter for specific record
-        for i in range(self.hashcount):
-            h = hashlib.md5() #for demo purposes just using md5
-            h.update(str(i)) #seed with i
-            h.update(record) #record only contains one column, otherwise hash every column
-            self.bitarray[int(int(h.hexdigest(),16)) % self.size] = 1
 
-    def join(self, bloomfilter): #combines a bloomfilter, useful for reconstruction assumed to be same size
-        for i in range(self.size):
-            if bloomfilter.bitarray[i] == 1:
-                self.bitarray[i] = 1
 
-class BloomFilterTree(): #probably a better way to construct this
-    def __init__(self, bloomfilters, dataRecords):
-        self.root = BloomFilter()
-        self.BFHashCount = 10
-        self.BFSize = 20
-        for bloomfilter in bloomfilters:
-            self.root.join(bloomfilter)
-        if len(bloomfilters) >= 2:
-            self.isLeaf = False
-            self.childLeft = BloomFilterTree(bloomfilters[0:len(bloomfilters)/2], dataRecords[0:len(bloomfilters)/2])
-            self.childRight = BloomFilterTree(bloomfilters[len(bloomfilters)/2:], dataRecords[len(bloomfilters)/2:])
+#endpoints.serverFromString(reactor, "tcp:1234").listen(EchoFactory())
+server1 = 0
+server2 = 0
+port = int(sys.argv[1])
+'''
+if port == 2222:
+    server1 = 2223
+    server2 = 2224
+elif port == 2223:
+    server1 = 2222
+    server2 = 2224
+elif port == 2224:
+    server1 = 2222
+    server2 = 2223
+    '''
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock.bind(('localhost', port))
+sock.listen(5)
+
+'''
+print(server1, server2)
+#attempt to establish connections with other IS servres
+sock1 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+sock2 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+while(True):
+    try:
+        sock1.connect(("localhost", server1))
+        break
+    except Exception as e:
+        print(e)
+        continue
+while(True):
+    try:
+        sock2.connect(("localhost", server2))
+        break
+    except Exception as e:
+        print(e)
+        continue
+
+'''
+#server = ISS()
+bloomFilter = {}
+shares = []
+
+def evalGC(GC, BF, connection):
+    garbledTable = GC["GATE"]
+    HMACK = "1234123412341234"
+    if type(GC["input1"]) is dict:
+        wire1 = evalGC(GC["input1"], BF, connection)
+    else:
+        #getkey
+        if "SBFK" in GC["input1"]:
+            print("SBFK")
+            idx = int(GC["input1"][-2:])
+            connection.sendall(str(BF[idx]) + GC["input1"])
+            while True:
+                wire1 = connection.recv(2048)
+                if wire1 != "":
+                    break
         else:
-            self.isLeaf = True
-            self.child = dataRecords[0]
-    def retrieveRecord(self, query):
-        #for now i'll just support a basic select query, e.g just SELECT INTVAL, can't query directly by index
-        params = query.split(" ")
-        if params[0].upper() == "SELECT":
-            #check if in root, then check children
-            for i in range(self.BFHashCount):
-                h = hashlib.md5() #for demo purposes just using md5
-                h.update(str(i)) #seed with i
-                h.update(params[1]) #record only contains one column, otherwise hash every column
-                if self.root.bitarray[int(int(h.hexdigest(),16)) % self.BFSize] != 1:
-                    return []
+            #print(GC["input1"])
+            #print(GC["input1"])
+            connection.sendall(GC["input1"])
+            while True:
+                wire1 = connection.recv(2048)
+                if wire1 != "":
+                    break
 
-            #if in root
-            if self.isLeaf:
-                return [self.child] #return datarecord
-            else:
-                recordsLeft = self.childLeft.retrieveRecord(query)
-                recordsRight = self.childRight.retrieveRecord(query)
-                return recordsLeft + recordsRight
+    if type(GC["input2"]) is dict:
+        wire2 = evalGC(GC["input2"], BF, connection)
+    else:
+        print("2", GC["input2"])
+        if "SBFK" in GC["input2"]:
+            idx = int(GC["input2"][4:])
+            print(BF)
+            connection.sendall(str(BF[idx]) + GC["input2"])
+            while True:
+                wire2 = connection.recv(2048)
+                if wire2 != "":
+                    break
+        else:
+            connection.sendall(GC["input2"])
+            while True:
+                wire2 = connection.recv(2048)
+                if wire2 != "":
+                    break
+        #getkey
+    print(wire1,wire2)
+    cipher1 = AES.new(wire1, AES.MODE_ECB)
+    cipher2 = AES.new(wire2, AES.MODE_ECB)
+    for row in garbledTable: 
+        encrypted = row[0].decode("base64")
+        MAC = row[1].decode("base64")
+        encrypted = cipher2.decrypt(encrypted)
+        key = cipher1.decrypt(encrypted)
+        h = hashlib.md5()
+        h.update(HMACK)
+        check = h.digest()
+        h.update(HMACK + check + key)
+        checksum = h.digest()
+        print(checksum, MAC)
+        if checksum == MAC:
+            return key
+
+    return
+
+print("hi")
+while 1:
+    curConnection, address= sock.accept()
+    print(curConnection, address)
+    databuf = ""
+    while 1:#probably should thread this eventually, networkign ish ard
+        data = curConnection.recv(2048)
+        if not data:
+            break
+        databuf += data
+        evaluate = 0
+        print(len(databuf))
+        try:
+            data = json.loads(databuf)
+            if data["action"] == "init":
+                print("init")
+                bloomFilter = data["BFTree"]
+                shares = data["shares"]
+                databuf = ""
+            if data["action"] == "query":
+                print("query")
+                evaluate = True
+                databuf = ""
+            if data["action"] == "getShares":
+                shares = ""
+                for index in data["indices"]:
+                    shares += "index: " + shares[int(index)] + " "
+                curConnection.sendall(shares)
 
 
-if test:
-    a = BloomFilter()
-    a.create("13")
-    b = BloomFilter()
-    b.create("50")
-    c = BloomFilter()
-    c.create("43")
-    print a.bitarray, 'a'
-    print b.bitarray, 'b'
-    print c.bitarray, 'c'
-    
-    BFTree = BloomFilterTree([a,b,c],["13","50","43"])
-    print BFTree.root.bitarray, 'should be a + b + c'  #should be a,b,c joined
-    print BFTree.childLeft.root.bitarray, 'should be a' #should just be a
-    print BFTree.childLeft.isLeaf, 'should be true'
-    print BFTree.childLeft.child, 'should be 13'
 
-    print BFTree.childRight.root.bitarray, 'should be b+c'
-    print BFTree.childRight.isLeaf, 'should be false'
-    print BFTree.childRight.childLeft.root.bitarray, 'should be b'
-    print BFTree.childRight.childRight.root.bitarray, 'should be c'
+        except Exception as err:
+            print(err)
+            #print("failed to parse json data")
+        if evaluate:
+            matches = []
+            output = evalGC(data["GC"], bloomFilter["root"], curConnection)
+            checkChildren = False
+            curConnection.sendall(output)
+            while True:
+                data = curConnection.recv(2048)
+                if data != "":
+                    if data == "1":
+                        curConnection.sendall("next")
+                        checkChildren = True
+                    elif data == "0":
+                        curConnection.sendall("failed")
+                    break
+            if checkChildren:
+                count = 0
+                for child in bloomFilter["children"]:
+                    databuf = ""
+                    while True:
+                        data = curConnection.recv(2048)
+                        databuf += data
+                        if len(data) != 2048:
+                            break
+                    data = json.loads(databuf)
+                    output = evalGC(data["GC"], child["root"], curConnection)
+                    curConnection.sendall(output)
+                    while True:
+                        data = curConnection.recv(2048)
+                        if data != "":
+                            if data == "1":
+                                curConnection.sendall("next")
+                                matches.append(str(count))
+                                break
+                            elif data == "0":
+                                curConnection.sendall("next")
+                                break
 
-    print BFTree.retrieveRecord("SELECT 13")
-    print BFTree.retrieveRecord("SELECT 32")
-    print BFTree.retrieveRecord("SELECT 50")
+                    count += 1
+                while True:
+                    uselessCircuit = curConnection.recv(2048)
+                    if uselessCircuit != "":
+                        break
 
+                curConnection.send("done")
+                while True:
+                    msg = curConnection.recv(2048)
+                    if msg == "get result":
+                        break
+                if len(matches) > 0:
+                    print(matches)
+                    print(shares)
+                    #figure out networking, contact other servers here, probably need to thread
+                    response = ""
+                    for match in matches:
+                        response += match + ": " + str(shares[int(match)]) + "\n"
+
+                    curConnection.sendall(response)
+                else:
+                    curConnection.sendall("failed")
+                databuf = ""
+
+            print('finished eval')
 
